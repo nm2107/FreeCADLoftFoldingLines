@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 
 import FreeCAD
-from math import floor
+from math import ceil, floor
 from DraftGeomUtils import isPtOnEdge, findIntersection
+from DraftVecUtils import closest
+
+def serializeVector(v: FreeCAD.Vector) -> str:
+    return "%f;%f;%f" % (v.x, v.y, v.z)
 
 
 def getPlaneCenter(plane: Part.Plane) -> FreeCAD.Vector:
@@ -179,78 +183,104 @@ def solveRayAngleFaceB(planeA, planeB, planesAxis, rayInitVertexA, rayInitVertex
         return angle * -1
 
 
-def buildFoldingPointsOnWire(w, wPlane, rayInitVertex, angle, showRays):
-    rayLength = getWireMaxBoundBox(w)
-    planeCenter = getPlaneCenter(wPlane)
-    rotationAxis = FreeCAD.Vector(wPlane.Axis)
 
-    refRay = Part.makeLine(planeCenter, buildInitialRayEndVertice(planeCenter, rayInitVertex, rayLength))
-    ray = refRay.rotated(planeCenter, rotationAxis, 0)
-    rays = []
+def getTotalLengthOfNonLinearEdges(edges: [Part.Edge]) -> float:
+    totalLength = 0.0
 
-    stepCount = floor(360 / abs(angle))
-    currentStep = 0
-    foldingPoints = []
-
-    while currentStep < stepCount:
-        intersectionPoint = getIntersectionPoint(ray, w)
-
-        if showRays:
-            rays.append(Part.makeLine(ray.Vertexes[0].Point, ray.Vertexes[1].Point))
-
-        # prepare next iteration
-        currentStep += 1
-        ray = refRay.rotated(planeCenter, rotationAxis, currentStep * angle)
-
-        if not intersectionPoint:
+    for edge in edges:
+        if isinstance(edge.Curve, Part.Line):
             continue
 
-        relatedEdge = getEdgeOnWhichPointIsOn(intersectionPoint, w.Edges)
+        totalLength += edge.Length
 
-        # @TODO? : add relatedEdge start and end points and be able to filter them.
-        # ALso check if we're on an edge start/end.
-        # If not, it may require to change the angle to add the edge start/end
-        # when it is close enough. Also make sure to keep the amount of points
-        # equal with the other face's wire.
-
-        # do not place a bend end on a line, as it should stay straight
-        if relatedEdge and isinstance(relatedEdge.Curve, Part.Line):
-            intersectionPoint = getEdgeEndClosestToPoint(intersectionPoint, relatedEdge)
-
-        foldingPoints.append(intersectionPoint)
+    return totalLength
 
 
-    if showRays:
-        Part.show(Part.makeCompound(rays))
+def buildFoldingPointsOnWire(wire: Part.Wire, maxPointsCount: int) -> [FreeCAD.Vector]:
+    foldingPoints = dict()
+    totalLengthOfNonLinearEdges = getTotalLengthOfNonLinearEdges(wire.Edges)
 
-    return foldingPoints
+    chunksOffset = 0
+    if len(wire.Edges) == 1:
+        chunksOffset = 1
+
+    for edge in wire.Edges:
+        if isinstance(edge.Curve, Part.Line):
+            # pick the start and end points of a straight line
+            for pt in [edge.valueAt(edge.FirstParameter), edge.valueAt(edge.LastParameter)]:
+                foldingPoints[serializeVector(pt)] = pt
+
+            continue
+
+        # compare the length of this non linear edge to the total length of
+        # non linear edges to know how many folding points we should place on it
+        pointsToPlaceCount = round((edge.Length * maxPointsCount) / totalLengthOfNonLinearEdges)
+
+        # pick the evenly spaced points on edge
+        for pt in edge.discretize(Number=pointsToPlaceCount + chunksOffset):
+            foldingPoints[serializeVector(pt)] = pt
+
+    return list(foldingPoints.values())
+
+
+class FoldingLine:
+    def __init__(self, pointFaceA: FreeCAD.Vector, pointFaceB: FreeCAD.Vector):
+        self.pointFaceA = pointFaceA
+        self.pointFaceB = pointFaceB
+
+    def getPointFaceA(self) -> FreeCAD.Vector:
+        return self.pointFaceA
+
+    def getPointFaceB(self) -> FreeCAD.Vector:
+        return self.pointFaceB
+
+
+def buildFoldingLines(pointsToProject, projectionFace, projectionAxis, pointsOnProjectionFace, isProjectionOnFaceB):
+    foldingLines: [FoldingLine] = []
+    projectionPlaneCenter = getPlaneCenter(projectionFace)
+
+    for pointToProject in pointsToProject:
+        projection = FreeCAD.Vector(pointToProject.x, pointToProject.y, pointToProject.z)
+        projection.projectToPlane(projectionPlaneCenter, projectionAxis)
+
+        closestPointIndex = closest(projection, pointsOnProjectionFace)
+        closestPoint = pointsOnProjectionFace[closestPointIndex]
+
+        if isProjectionOnFaceB:
+            foldingLine = FoldingLine(pointToProject, closestPoint)
+        else:
+            foldingLine = FoldingLine(closestPoint, pointToProject)
+
+        foldingLines.append(foldingLine)
+
+    return foldingLines
 
 
 def arePointsIdentical(pointA, pointB):
     return 0.0 == pointA.distanceToPoint(pointB)
 
 
-def filterPoints(pointsA, pointsB):
-    """When consecutive points are on the same emplacement, skip them.
-    """
-    filteredPointsA = []
-    filteredPointsB = []
+# def filterPoints(pointsA, pointsB):
+#     """When consecutive points are on the same emplacement, skip them.
+#     """
+#     filteredPointsA = []
+#     filteredPointsB = []
 
-    for i in range(len(pointsA)):
-        currentPointA = pointsA[i]
-        currentPointB = pointsB[i]
+#     for i in range(len(pointsA)):
+#         currentPointA = pointsA[i]
+#         currentPointB = pointsB[i]
 
-        if i > 0:
-            if arePointsIdentical(currentPointA, pointsA[0]) and arePointsIdentical(currentPointB, pointsB[0]):
-                continue
+#         if i > 0:
+#             if arePointsIdentical(currentPointA, pointsA[0]) and arePointsIdentical(currentPointB, pointsB[0]):
+#                 continue
 
-            if arePointsIdentical(currentPointA, pointsA[i - 1]) and arePointsIdentical(currentPointB, pointsB[i - 1]):
-                continue
+#             if arePointsIdentical(currentPointA, pointsA[i - 1]) and arePointsIdentical(currentPointB, pointsB[i - 1]):
+#                 continue
 
-        filteredPointsA.append(currentPointA)
-        filteredPointsB.append(currentPointB)
+#         filteredPointsA.append(currentPointA)
+#         filteredPointsB.append(currentPointB)
 
-    return (filteredPointsA, filteredPointsB)
+#     return (filteredPointsA, filteredPointsB)
 
 
 def connectPointsOn3DShape(pointsA, pointsB):
@@ -352,41 +382,60 @@ def drawFlattenRepresentation(flattenPointsA, flattenPointsB):
     Part.show(Part.makeCompound(edges))
 
 
+def getWiresFromGuiSelection() -> (Part.Wire, Part.Wire):
+    sel = Gui.Selection.getSelection()
+
+    if 2 != len(sel):
+        raise ValueError("Please select two sketches.")
+
+    for s in sel:
+        if "Sketcher::SketchObject" != s.TypeId:
+            raise ValueError("Wrong selection, only sketches are allowed.")
+
+    skA = sel[0]
+    skB = sel[1]
+
+    return (skA.Shape, skB.Shape)
+
+
+
 def main():
-    # @TODO : GUI to set angle, showRays opt, show folding lines on 3D shape opt
+    # @TODO : GUI to set angle, show folding lines on 3D shape opt
     angle = 10.0
-    showRays = False
+    maxPointsCount = ceil(360 / angle)
 
-    # @TODO : sanitise selection
-    faceA = Gui.Selection.getSelectionEx()[0].SubObjects[0]
-    faceB = Gui.Selection.getSelectionEx()[0].SubObjects[1]
-
-    wireFaceA = faceA.Wires[0]
-    wireFaceB = faceB.Wires[0]
+    wireFaceA, wireFaceB = getWiresFromGuiSelection()
 
     planeA = wireFaceA.findPlane()
     planeB = wireFaceB.findPlane()
     planesAxis = getVectorBewteenTwoPlanes(planeA, planeB)
 
     # where to place the initial ray on each face
-    rayInitVertexA, rayInitVertexB = solveRayInitVertexes(wireFaceA, wireFaceB, planeB)
+    # rayInitVertexA, rayInitVertexB = solveRayInitVertexes(wireFaceA, wireFaceB, planeB)
 
-    rayAngleFaceA = angle
+    # rayAngleFaceA = angle
     # could be in the opposite direction of rayAngleFaceA
-    rayAngleFaceB = solveRayAngleFaceB(planeA, planeB, planesAxis, rayInitVertexA, rayInitVertexB, angle)
+    # rayAngleFaceB = solveRayAngleFaceB(planeA, planeB, planesAxis, rayInitVertexA, rayInitVertexB, angle)
 
-    pointsWireA = buildFoldingPointsOnWire(wireFaceA, planeA, rayInitVertexA, rayAngleFaceA, showRays)
-    pointsWireB = buildFoldingPointsOnWire(wireFaceB, planeB, rayInitVertexB, rayAngleFaceB, showRays)
+    pointsWireA = buildFoldingPointsOnWire(wireFaceA, maxPointsCount)
+    pointsWireB = buildFoldingPointsOnWire(wireFaceB, maxPointsCount)
 
-    if len(pointsWireA) != len(pointsWireB):
-        # should have the same amount of points
-        return
 
-    pointsWireA, pointsWireB = filterPoints(pointsWireA, pointsWireB)
+    # if len(pointsWireB) > len(pointsWireA):
+    if wireFaceB.Length > wireFaceA.Length:
+        foldingLines = buildFoldingLines(pointsWireB, planeA, planesAxis, pointsWireA, False)
+    else:
+        foldingLines = buildFoldingLines(pointsWireA, planeB, planesAxis, pointsWireB, True)
 
-    connectPointsOn3DShape(pointsWireA, pointsWireB)
-    flattenPointsA, flattenPointsB = flattenWiresPoints(pointsWireA, pointsWireB)
-    drawFlattenRepresentation(flattenPointsA, flattenPointsB)
+    lines = []
+    for foldingLine in foldingLines:
+        lines.append(Part.makeLine(foldingLine.getPointFaceA(), foldingLine.getPointFaceB()))
+    Part.show(Part.makeCompound(lines))
+
+
+    # connectPointsOn3DShape(pointsWireA, pointsWireB)
+    # flattenPointsA, flattenPointsB = flattenWiresPoints(pointsWireA, pointsWireB)
+    # drawFlattenRepresentation(flattenPointsA, flattenPointsB)
 
 
 main()
