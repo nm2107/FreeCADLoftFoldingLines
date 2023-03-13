@@ -223,7 +223,8 @@ def buildFoldingPointsOnWire(wire: Part.Wire, maxPointsCount: int) -> [FreeCAD.V
     return list(foldingPoints.values())
 
 
-class FoldingLine:
+class FoldingLine():
+    """A folding line on the 3D shape."""
     def __init__(self, pointFaceA: FreeCAD.Vector, pointFaceB: FreeCAD.Vector):
         self.pointFaceA = pointFaceA
         self.pointFaceB = pointFaceB
@@ -235,7 +236,12 @@ class FoldingLine:
         return self.pointFaceB
 
 
-def buildFoldingLines(pointsToProject, projectionFace, projectionAxis, pointsOnProjectionFace, isProjectionOnFaceB):
+class FlatFoldingLine(FoldingLine):
+    """A flatten representation of a FoldingLine"""
+    pass
+
+
+def build3DFoldingLines(pointsToProject, projectionFace, projectionAxis, pointsOnProjectionFace, isProjectionOnFaceB):
     foldingLines: [FoldingLine] = []
     projectionPlaneCenter = getPlaneCenter(projectionFace)
 
@@ -283,26 +289,33 @@ def arePointsIdentical(pointA, pointB):
 #     return (filteredPointsA, filteredPointsB)
 
 
-def connectPointsOn3DShape(pointsA, pointsB):
-    """Draw the folding lines on the 3D shape
+def showFoldingLinesOn3DShape(foldingLines: [FoldingLine]) -> None:
+    """Draw the folding lines on the 3D shape.
     """
-    foldingLines = []
-    for i in range(len(pointsA)):
+    lines = []
 
-        foldingLines.append(Part.makeLine(pointsA[i], pointsB[i]))
+    for foldingLine in foldingLines:
+        lines.append(Part.makeLine(foldingLine.getPointFaceA(), foldingLine.getPointFaceB()))
 
-    Part.show(Part.makeCompound(foldingLines))
+    Part.show(Part.makeCompound(lines))
 
 
-def flattenSection(pointsA, pointsB, i, previousAFlat, previousBFlat):
-    """Computes the points of a flatten folding line"""
+def flattenFoldingLine(foldingLines: [FoldingLine], previousFlatFoldingLine: FlatFoldingLine, i: int) -> FlatFoldingLine:
+    """Computes the flatten representation of a folding line."""
     if (i < 1):
         return
 
-    aStepLength = pointsA[i - 1].distanceToPoint(pointsA[i])
-    bStepLength = pointsB[i - 1].distanceToPoint(pointsB[i])
-    distAB = pointsA[i].distanceToPoint(pointsB[i])
-    diagLength = pointsA[i - 1].distanceToPoint(pointsB[i])
+    pointA = foldingLines[i].getPointFaceA()
+    pointB = foldingLines[i].getPointFaceB()
+    previousPointA = foldingLines[i - 1].getPointFaceA()
+    previousPointB = foldingLines[i - 1].getPointFaceB()
+    previousAFlat = previousFlatFoldingLine.getPointFaceA()
+    previousBFlat = previousFlatFoldingLine.getPointFaceB()
+
+    aStepLength = previousPointA.distanceToPoint(pointA)
+    bStepLength = previousPointB.distanceToPoint(pointB)
+    distAB = pointA.distanceToPoint(pointB)
+    diagLength = previousPointA.distanceToPoint(pointB)
 
     # use circles to find the position of the bFlat point
     circleBStep = Part.makeCircle(bStepLength, previousBFlat)
@@ -314,35 +327,30 @@ def flattenSection(pointsA, pointsB, i, previousAFlat, previousBFlat):
     circleAFlatBFlat = Part.makeCircle(distAB, bFlat)
     aFlat = findIntersection(circleAStep, circleAFlatBFlat)[-1]
 
-    return (aFlat, bFlat)
+    return FlatFoldingLine(aFlat, bFlat)
 
 
-def flattenWiresPoints(pointsA, pointsB):
+def flattenFoldingLines(foldingLines: [FoldingLine]) -> [FlatFoldingLine]:
     """Computes the points of the flatten folding lines"""
-    flattenPointsA = []
-    flattenPointsB = []
+    flatFoldingLines = []
     i = 0
 
-    aFlat = FreeCAD.Vector(0.0, 0.0, 0.0)
-    distAB = pointsA[i].distanceToPoint(pointsB[i])
-    bFlat = FreeCAD.Vector(distAB, 0.0, 0.0)
+    distAB = foldingLines[i].getPointFaceA().distanceToPoint(foldingLines[i].getPointFaceB())
+    flatFoldingLine = FlatFoldingLine(FreeCAD.Vector(0.0, 0.0, 0.0), FreeCAD.Vector(distAB, 0.0, 0.0))
 
-    previousAFlat = aFlat
-    previousBFlat = bFlat
-    flattenPointsA.append(previousAFlat)
-    flattenPointsB.append(previousBFlat)
+    previousFlatFoldingLine = flatFoldingLine
+    flatFoldingLines.append(previousFlatFoldingLine)
     i += 1
 
-    while (i < len(pointsA)):
-        previousAFlat, previousBFlat = flattenSection(pointsA, pointsB, i, previousAFlat, previousBFlat)
-        flattenPointsA.append(previousAFlat)
-        flattenPointsB.append(previousBFlat)
+    while (i < len(foldingLines)):
+        previousFlatFoldingLine = flattenFoldingLine(foldingLines, previousFlatFoldingLine, i)
+        flatFoldingLines.append(previousFlatFoldingLine)
         i += 1
 
-    return (flattenPointsA, flattenPointsB)
+    return flatFoldingLines
 
 
-def buildEdges(points, edges = []):
+def buildEdges(points: [FreeCAD.Vector], edges = []) -> None:
     """Link the given points by making edges, and add the created edges to the
     given edges array parameter.
     """
@@ -359,20 +367,27 @@ def buildEdges(points, edges = []):
         edges.append(Part.makeLine(previousPoint, currentPoint))
 
 
-def drawFlattenRepresentation(flattenPointsA, flattenPointsB):
-    """Draw the flatten representation of the shape and folding lines.
+def drawFlattenRepresentation(flatFoldingLines: [FlatFoldingLine]) -> None:
+    """Draw the flatten representation of the shape and its folding lines.
     """
     edges = []
-    i = 0
-    pointsCount = len(flattenPointsA)
+    foldingLinesCount = len(flatFoldingLines)
+
+    flattenPointsA = []
+    flattenPointsB = []
+
+    for i in range(foldingLinesCount):
+        flattenPointsA.append(flatFoldingLines[i].getPointFaceA())
+        flattenPointsB.append(flatFoldingLines[i].getPointFaceB())
 
     # the flat edges of A & B wires
     buildEdges(flattenPointsA, edges)
     buildEdges(flattenPointsB, edges)
 
-    while (i < pointsCount):
+    i = 0
+    while (i < foldingLinesCount):
         # the folding lines
-        edges.append(Part.makeLine(flattenPointsA[i], flattenPointsB[i]))
+        edges.append(Part.makeLine(flatFoldingLines[i].getPointFaceA(), flatFoldingLines[i].getPointFaceB()))
         i += 1
 
     # Sometimes there's a `BRepAdaptor_Curve::No geometry` error when trying to draw
@@ -420,22 +435,15 @@ def main():
     pointsWireA = buildFoldingPointsOnWire(wireFaceA, maxPointsCount)
     pointsWireB = buildFoldingPointsOnWire(wireFaceB, maxPointsCount)
 
-
-    # if len(pointsWireB) > len(pointsWireA):
     if wireFaceB.Length > wireFaceA.Length:
-        foldingLines = buildFoldingLines(pointsWireB, planeA, planesAxis, pointsWireA, False)
+        foldingLines = build3DFoldingLines(pointsWireB, planeA, planesAxis, pointsWireA, False)
     else:
-        foldingLines = buildFoldingLines(pointsWireA, planeB, planesAxis, pointsWireB, True)
+        foldingLines = build3DFoldingLines(pointsWireA, planeB, planesAxis, pointsWireB, True)
 
-    lines = []
-    for foldingLine in foldingLines:
-        lines.append(Part.makeLine(foldingLine.getPointFaceA(), foldingLine.getPointFaceB()))
-    Part.show(Part.makeCompound(lines))
+    showFoldingLinesOn3DShape(foldingLines)
 
-
-    # connectPointsOn3DShape(pointsWireA, pointsWireB)
-    # flattenPointsA, flattenPointsB = flattenWiresPoints(pointsWireA, pointsWireB)
-    # drawFlattenRepresentation(flattenPointsA, flattenPointsB)
+    flatFoldingLines = flattenFoldingLines(foldingLines)
+    drawFlattenRepresentation(flatFoldingLines)
 
 
 main()
