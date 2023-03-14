@@ -56,6 +56,29 @@ def getEdgeEndClosestToPoint(point: FreeCAD.Vector, edge: Part.Edge | Part.Line)
         return end2
 
 
+def getVectorBewteenTwoVertexes(va: FreeCAD.Vector, vb: FreeCAD.Vector) -> FreeCAD.Vector:
+    """Returns a vector aligned with the given vertexes.
+
+    Parameters
+    ----------
+    va : FreeCAD.Vector
+    vb : FreeCAD.Vector
+
+    Returns
+    -------
+    FreeCAD.Vector
+    """
+
+    vec: FreeCAD.Vector = None
+
+    if va.Length > vb.Length:
+        vec = va.sub(vb)
+    else:
+        vec = vb.sub(va)
+
+    return vec
+
+
 def getVectorBewteenTwoPlanes(pa: Part.Plane, pb: Part.Plane) -> FreeCAD.Vector:
     """Returns a vector aligned with the given planes centers.
 
@@ -69,20 +92,7 @@ def getVectorBewteenTwoPlanes(pa: Part.Plane, pb: Part.Plane) -> FreeCAD.Vector:
     FreeCAD.Vector
     """
 
-    aCenter = getPlaneCenter(pa)
-    bCenter = getPlaneCenter(pb)
-
-    nVec: FreeCAD.Vector = None
-
-    aLength = aCenter.Length
-    bLength = bCenter.Length
-
-    if aLength > bLength:
-        nVec = aCenter.sub(bCenter)
-    else:
-        nVec = bCenter.sub(aCenter)
-
-    return nVec
+    return getVectorBewteenTwoVertexes(getPlaneCenter(pa), getPlaneCenter(pb))
 
 
 def solveRayInitVertexes(wireA: Part.Wire, wireB: Part.Wire, planeB: Part.Plane) -> (FreeCAD.Vector, FreeCAD.Vector):
@@ -195,19 +205,25 @@ def getTotalLengthOfNonLinearEdges(edges: [Part.Edge]) -> float:
 
     return totalLength
 
+def getFoldingPointsOnStraightEdge(edge: Part.Edge) -> [FreeCAD.Vector]:
+    return [edge.valueAt(edge.FirstParameter), edge.valueAt(edge.LastParameter)]
+
 
 def buildFoldingPointsOnWire(wire: Part.Wire, maxPointsCount: int) -> [FreeCAD.Vector]:
+    # order the edges in a geometrical way (the end of one edge matches the start of the next one)
+    # edges = Part.__sortEdges__(wire.Edges)
+    edges = wire.Edges
     foldingPoints = dict()
-    totalLengthOfNonLinearEdges = getTotalLengthOfNonLinearEdges(wire.Edges)
+    totalLengthOfNonLinearEdges = getTotalLengthOfNonLinearEdges(edges)
 
     chunksOffset = 0
-    if len(wire.Edges) == 1:
+    if len(edges) == 1:
         chunksOffset = 1
 
-    for edge in wire.Edges:
+    for edge in edges:
         if isinstance(edge.Curve, Part.Line):
             # pick the start and end points of a straight line
-            for pt in [edge.valueAt(edge.FirstParameter), edge.valueAt(edge.LastParameter)]:
+            for pt in getFoldingPointsOnStraightEdge(edge):
                 foldingPoints[serializeVector(pt)] = pt
 
             continue
@@ -241,23 +257,62 @@ class FlatFoldingLine(FoldingLine):
     pass
 
 
-def build3DFoldingLines(pointsToProject, projectionFace, projectionAxis, pointsOnProjectionFace, isProjectionOnFaceB):
+# def build3DFoldingLines(pointsToProject, projectionFace, projectionAxis, pointsOnProjectionFace, isProjectionOnFaceB):
+#     foldingLines: [FoldingLine] = []
+#     projectionPlaneCenter = getPlaneCenter(projectionFace)
+
+#     for pointToProject in pointsToProject:
+#         projection = FreeCAD.Vector(pointToProject.x, pointToProject.y, pointToProject.z)
+#         projection.projectToPlane(projectionPlaneCenter, projectionAxis)
+
+#         closestPointIndex = closest(projection, pointsOnProjectionFace)
+#         closestPoint = pointsOnProjectionFace[closestPointIndex]
+
+#         if isProjectionOnFaceB:
+#             foldingLine = FoldingLine(pointToProject, closestPoint)
+#         else:
+#             foldingLine = FoldingLine(closestPoint, pointToProject)
+
+#         foldingLines.append(foldingLine)
+
+#     return foldingLines
+
+
+def findVectorHavingTheClosestDirectionToPlanesAxis(baseVertex: FreeCAD.Vector, vectorsPool: [FreeCAD.Vector], planesAxis: FreeCAD.Vector) -> FreeCAD.Vector:
+    foundVector: FreeCAD.Vector = None
+    foundDot = 0.0
+    normalizedPlanesAxis = FreeCAD.Vector(planesAxis.x, planesAxis.y, planesAxis.z)
+    normalizedPlanesAxis.normalize()
+
+    for v in vectorsPool:
+        baseVertexToTestedVectorAxis = getVectorBewteenTwoVertexes(baseVertex, v)
+        baseVertexToTestedVectorAxis.normalize()
+        dot = baseVertexToTestedVectorAxis.dot(normalizedPlanesAxis)
+
+        if dot > foundDot:
+            foundDot = dot
+            foundVector = v
+
+    return foundVector
+
+
+def buildFoldingLinesAtStraightEdgesEnds(wire: Part.Wire, otherFacePoints: [FreeCAD.Vector], planesAxis: FreeCAD.Vector) -> [FoldingLine]:
     foldingLines: [FoldingLine] = []
-    projectionPlaneCenter = getPlaneCenter(projectionFace)
+    edges = wire.Edges
 
-    for pointToProject in pointsToProject:
-        projection = FreeCAD.Vector(pointToProject.x, pointToProject.y, pointToProject.z)
-        projection.projectToPlane(projectionPlaneCenter, projectionAxis)
+    for edge in edges:
+        if not isinstance(edge.Curve, Part.Line):
+            continue
 
-        closestPointIndex = closest(projection, pointsOnProjectionFace)
-        closestPoint = pointsOnProjectionFace[closestPointIndex]
+        edgeEnds = getFoldingPointsOnStraightEdge(edge)
+        edgeStart = edgeEnds[0]
+        edgeEnd = edgeEnds[1]
+        edgeMiddle = edge.valueAt(edge.LastParameter / 2)
 
-        if isProjectionOnFaceB:
-            foldingLine = FoldingLine(pointToProject, closestPoint)
-        else:
-            foldingLine = FoldingLine(closestPoint, pointToProject)
+        relatedPoint = findVectorHavingTheClosestDirectionToPlanesAxis(edgeMiddle, otherFacePoints, planesAxis)
 
-        foldingLines.append(foldingLine)
+        foldingLines.append(FoldingLine(relatedPoint, edgeStart))
+        foldingLines.append(FoldingLine(relatedPoint, edgeEnd))
 
     return foldingLines
 
@@ -435,10 +490,33 @@ def main():
     pointsWireA = buildFoldingPointsOnWire(wireFaceA, maxPointsCount)
     pointsWireB = buildFoldingPointsOnWire(wireFaceB, maxPointsCount)
 
-    if wireFaceB.Length > wireFaceA.Length:
-        foldingLines = build3DFoldingLines(pointsWireB, planeA, planesAxis, pointsWireA, False)
-    else:
-        foldingLines = build3DFoldingLines(pointsWireA, planeB, planesAxis, pointsWireB, True)
+
+    def dbgg(foldingLines):
+        lines = []
+        for foldingLine in foldingLines:
+            lines.append(Part.makeLine(foldingLine.getPointFaceA(), foldingLine.getPointFaceB()))
+
+        if (len(lines) > 0):
+            Part.show(Part.makeCompound(lines))
+
+    dbgg(buildFoldingLinesAtStraightEdgesEnds(wireFaceA, pointsWireB, planesAxis))
+    dbgg(buildFoldingLinesAtStraightEdgesEnds(wireFaceB, pointsWireA, planesAxis))
+
+    return
+
+    # def dbgg(pts):
+    #     for pt in pts:
+    #         Part.show(Part.Vertex(pt.x, pt.y, pt.z))
+
+    # dbgg(pointsWireA)
+    # dbgg(pointsWireB)
+    # return
+
+    # if len(pointsWireB) > len(pointsWireA):
+    # # if wireFaceB.Length > wireFaceA.Length:
+    #     foldingLines = build3DFoldingLines(pointsWireB, planeA, planesAxis, pointsWireA, False)
+    # else:
+    #     foldingLines = build3DFoldingLines(pointsWireA, planeB, planesAxis, pointsWireB, True)
 
     showFoldingLinesOn3DShape(foldingLines)
 
