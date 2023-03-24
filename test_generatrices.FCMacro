@@ -239,9 +239,19 @@ class FoldingPoint():
 
 
 def getFoldingPointsOnStraightEdge(edge: Part.Edge) -> [FoldingPoint]:
+    firstPoint = edge.valueAt(edge.FirstParameter)
+    lastPoint = edge.valueAt(edge.LastParameter)
+
+    firstTangent = edge.tangentAt(edge.FirstParameter)
+    lastTangent = edge.tangentAt(edge.LastParameter)
+
+    # @see https://forum.freecad.org/viewtopic.php?p=670516#p670516
+    firstTangent.multiply(-1.0)
+    lastTangent.multiply(-1.0)
+
     return [
-        FoldingPoint(edge.valueAt(edge.FirstParameter), edge.tangentAt(edge.FirstParameter)),
-        FoldingPoint(edge.valueAt(edge.LastParameter), edge.tangentAt(edge.LastParameter))
+        FoldingPoint(firstPoint, firstTangent),
+        FoldingPoint(lastPoint, lastTangent)
     ]
 
 
@@ -273,7 +283,10 @@ def buildFoldingPointsOnWire(wire: Part.Wire, maxPointsCount: int) -> [FoldingPo
         for i in range(pointsToPlaceCount + chunksOffset):
             at = edge.FirstParameter + (stepSize * i) * (edge.LastParameter - edge.FirstParameter)
             foldingPoint = FoldingPoint(edge.valueAt(at), edge.tangentAt(at))
-            foldingPoints[serializeVector(foldingPoint.getPoint())] = foldingPoint
+            serialized = serializeVector(foldingPoint.getPoint())
+
+            if not serialized in foldingPoints:
+                foldingPoints[serialized] = foldingPoint
 
     return list(foldingPoints.values())
 
