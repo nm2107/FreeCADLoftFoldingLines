@@ -245,10 +245,6 @@ def getFoldingPointsOnStraightEdge(edge: Part.Edge) -> [FoldingPoint]:
     firstTangent = edge.tangentAt(edge.FirstParameter)
     lastTangent = edge.tangentAt(edge.LastParameter)
 
-    # @see https://forum.freecad.org/viewtopic.php?p=670516#p670516
-    firstTangent.multiply(-1.0)
-    lastTangent.multiply(-1.0)
-
     return [
         FoldingPoint(firstPoint, firstTangent),
         FoldingPoint(lastPoint, lastTangent)
@@ -257,8 +253,8 @@ def getFoldingPointsOnStraightEdge(edge: Part.Edge) -> [FoldingPoint]:
 
 def buildFoldingPointsOnWire(wire: Part.Wire, maxPointsCount: int) -> [FoldingPoint]:
     # order the edges in a geometrical way (the end of one edge matches the start of the next one)
-    # edges = Part.__sortEdges__(wire.Edges)
-    edges = wire.Edges
+    edges = Part.__sortEdges__(wire.Edges)
+    # edges = wire.Edges
     foldingPoints = dict()
     totalLengthOfNonLinearEdges = getTotalLengthOfNonLinearEdges(edges)
 
