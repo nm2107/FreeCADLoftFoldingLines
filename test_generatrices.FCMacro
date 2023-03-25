@@ -158,15 +158,21 @@ def flattenFoldingLine(foldingLines: [FoldingLine], previousFlatFoldingLine: Fla
     distAB = pointA.distanceToPoint(pointB)
     diagLength = previousPointA.distanceToPoint(pointB)
 
-    # use circles to find the position of the bFlat point
-    circleBStep = Part.makeCircle(bStepLength, previousBFlat)
-    circleDiag = Part.makeCircle(diagLength, previousAFlat)
-    bFlat = findIntersection(circleBStep, circleDiag)[0]
+    if (0.0 == bStepLength):
+        bFlat = previousBFlat
+    else:
+        # use circles to find the position of the bFlat point
+        circleBStep = Part.makeCircle(bStepLength, previousBFlat)
+        circleDiag = Part.makeCircle(diagLength, previousAFlat)
+        bFlat = findIntersection(circleBStep, circleDiag)[0]
 
-    # use circles to find the position of the aFlat point
-    circleAStep = Part.makeCircle(aStepLength, previousAFlat)
-    circleAFlatBFlat = Part.makeCircle(distAB, bFlat)
-    aFlat = findIntersection(circleAStep, circleAFlatBFlat)[-1]
+    if (0.0 == aStepLength):
+        aFlat = previousAFlat
+    else:
+        # use circles to find the position of the aFlat point
+        circleAStep = Part.makeCircle(aStepLength, previousAFlat)
+        circleAFlatBFlat = Part.makeCircle(distAB, bFlat)
+        aFlat = findIntersection(circleAStep, circleAFlatBFlat)[-1]
 
     return FlatFoldingLine(aFlat, bFlat)
 
