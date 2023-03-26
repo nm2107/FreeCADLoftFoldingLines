@@ -33,8 +33,19 @@ class FoldingLine():
         return self.pointFaceB
 
 
+class CosmeticFoldingLine(FoldingLine):
+    """A line for cosmetic (i.e. guide) purposes. There is actually no folding on
+    this line, it is only used as a guide."""
+    pass
+
+
 class FlatFoldingLine(FoldingLine):
     """A flatten representation of a FoldingLine"""
+    pass
+
+
+class CosmeticFlatFoldingLine(FlatFoldingLine):
+    """A flatten representation of a CosmeticFoldingLine"""
     pass
 
 
@@ -52,15 +63,23 @@ class FoldingPoint():
         return self.tangent
 
 
+class CosmeticFoldingPoint(FoldingPoint):
+    """A point used at one extremity of a CosmeticFoldingLine."""
+    pass
+
+
 def getFoldingPointsOnStraightEdge(edge: Part.Edge) -> [FoldingPoint]:
     firstPoint = edge.valueAt(edge.FirstParameter)
+    middlePoint = edge.valueAt(edge.FirstParameter + (edge.LastParameter - edge.FirstParameter) / 2)
     lastPoint = edge.valueAt(edge.LastParameter)
 
     firstTangent = edge.tangentAt(edge.FirstParameter)
+    middleTangent = edge.tangentAt(edge.FirstParameter + (edge.LastParameter - edge.FirstParameter) / 2)
     lastTangent = edge.tangentAt(edge.LastParameter)
 
     return [
         FoldingPoint(firstPoint, firstTangent),
+        CosmeticFoldingPoint(middlePoint, middleTangent),
         FoldingPoint(lastPoint, lastTangent)
     ]
 
@@ -121,7 +140,12 @@ def buildFoldingLines(pointsWireA: [FoldingPoint], pointsWireB: [FoldingPoint], 
             res = abs(va.dot(vb.cross(vc)))
 
             if (res < tolerance):
-                foldingLines.append(FoldingLine(pointWireA.getPoint(), pointWireB.getPoint()))
+                if isinstance(pointWireA, CosmeticFoldingPoint) or isinstance(pointWireB, CosmeticFoldingPoint):
+                    foldingLine = CosmeticFoldingLine(pointWireA.getPoint(), pointWireB.getPoint())
+                else:
+                    foldingLine = FoldingLine(pointWireA.getPoint(), pointWireB.getPoint())
+
+                foldingLines.append(foldingLine)
 
     return foldingLines
 
@@ -142,8 +166,9 @@ def flattenFoldingLine(foldingLines: [FoldingLine], previousFlatFoldingLine: Fla
     if (i < 1):
         return
 
-    pointA = foldingLines[i].getPointFaceA()
-    pointB = foldingLines[i].getPointFaceB()
+    foldingLine = foldingLines[i]
+    pointA = foldingLine.getPointFaceA()
+    pointB = foldingLine.getPointFaceB()
     previousPointA = foldingLines[i - 1].getPointFaceA()
     previousPointB = foldingLines[i - 1].getPointFaceB()
     previousAFlat = previousFlatFoldingLine.getPointFaceA()
@@ -170,7 +195,10 @@ def flattenFoldingLine(foldingLines: [FoldingLine], previousFlatFoldingLine: Fla
         circleAFlatBFlat = Part.makeCircle(distAB, bFlat)
         aFlat = findIntersection(circleAStep, circleAFlatBFlat)[-1]
 
-    return FlatFoldingLine(aFlat, bFlat)
+    if isinstance(foldingLine, CosmeticFoldingLine):
+        return CosmeticFlatFoldingLine(aFlat, bFlat)
+    else:
+        return FlatFoldingLine(aFlat, bFlat)
 
 
 def flattenFoldingLines(foldingLines: [FoldingLine]) -> [FlatFoldingLine]:
