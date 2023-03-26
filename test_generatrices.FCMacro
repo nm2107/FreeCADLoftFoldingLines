@@ -8,10 +8,6 @@ def serializeVector(v: FreeCAD.Vector) -> str:
     return "%f;%f;%f" % (v.x, v.y, v.z)
 
 
-def arePointsIdentical(pointA, pointB):
-    return 0.0 == pointA.distanceToPoint(pointB)
-
-
 def getTotalLengthOfNonLinearEdges(edges: [Part.Edge]) -> float:
     totalLength = 0.0
 
@@ -208,7 +204,10 @@ def buildFlatEdges(points: [FreeCAD.Vector], edges = []) -> None:
         currentPoint = points[i]
         i += 1
 
-        if (arePointsIdentical(previousPoint, currentPoint)):
+        if (previousPoint.distanceToPoint(currentPoint) < 1e-10):
+            # Consider points as identical, so can't make a line.
+            # If we try to make a line in this case, it would result into a
+            # `BRepAdaptor_Curve::No geometry` error.
             continue
 
         edges.append(Part.makeLine(previousPoint, currentPoint))
@@ -237,10 +236,6 @@ def drawFlattenRepresentation(flatFoldingLines: [FlatFoldingLine]) -> None:
         edges.append(Part.makeLine(flatFoldingLines[i].getPointFaceA(), flatFoldingLines[i].getPointFaceB()))
         i += 1
 
-    # Sometimes there's a `BRepAdaptor_Curve::No geometry` error when trying to draw
-    # the flatten representation as a compound. If this occurs, you can still
-    # downgrade the shape into multiple edges using the Draft->downgrade button
-    # and place all the edges into a directory (i.e. a group).
     Part.show(Part.makeCompound(edges))
 
 
