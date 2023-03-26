@@ -163,8 +163,6 @@ def showFoldingLinesOn3DShape(foldingLines: [FoldingLine]) -> None:
 
 def flattenFoldingLine(foldingLines: [FoldingLine], previousFlatFoldingLine: FlatFoldingLine, i: int) -> FlatFoldingLine:
     """Computes the flatten representation of a folding line."""
-    if (i < 1):
-        return
 
     foldingLine = foldingLines[i]
     pointA = foldingLine.getPointFaceA()
@@ -217,6 +215,12 @@ def flattenFoldingLines(foldingLines: [FoldingLine]) -> [FlatFoldingLine]:
         previousFlatFoldingLine = flattenFoldingLine(foldingLines, previousFlatFoldingLine, i)
         flatFoldingLines.append(previousFlatFoldingLine)
         i += 1
+
+    # Add again the first folding line to be drawn in last position so the flatten
+    # representation can be wrapped up having the two drawings of the first folding line
+    # superposed.
+    previousFlatFoldingLine = flattenFoldingLine(foldingLines, previousFlatFoldingLine, 0)
+    flatFoldingLines.append(previousFlatFoldingLine)
 
     return flatFoldingLines
 
