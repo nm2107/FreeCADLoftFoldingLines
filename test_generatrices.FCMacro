@@ -68,20 +68,24 @@ class CosmeticFoldingPoint(FoldingPoint):
     pass
 
 
-def getFoldingPointsOnStraightEdge(edge: Part.Edge) -> [FoldingPoint]:
+def getFoldingPointsOnStraightEdge(edge: Part.Edge, computeCosmeticFoldingPoints: bool) -> [FoldingPoint]:
+    foldingPoints: [FoldingPoint] = []
+
     firstPoint = edge.valueAt(edge.FirstParameter)
-    middlePoint = edge.valueAt(edge.FirstParameter + (edge.LastParameter - edge.FirstParameter) / 2)
-    lastPoint = edge.valueAt(edge.LastParameter)
-
     firstTangent = edge.tangentAt(edge.FirstParameter)
-    middleTangent = edge.tangentAt(edge.FirstParameter + (edge.LastParameter - edge.FirstParameter) / 2)
-    lastTangent = edge.tangentAt(edge.LastParameter)
+    foldingPoints.append(FoldingPoint(firstPoint, firstTangent))
 
-    return [
-        FoldingPoint(firstPoint, firstTangent),
-        CosmeticFoldingPoint(middlePoint, middleTangent),
-        FoldingPoint(lastPoint, lastTangent)
-    ]
+    if computeCosmeticFoldingPoints:
+        at = edge.FirstParameter + (edge.LastParameter - edge.FirstParameter) / 2
+        middlePoint = edge.valueAt(at)
+        middleTangent = edge.tangentAt(at)
+        foldingPoints.append(CosmeticFoldingPoint(middlePoint, middleTangent))
+
+    lastPoint = edge.valueAt(edge.LastParameter)
+    lastTangent = edge.tangentAt(edge.LastParameter)
+    foldingPoints.append(FoldingPoint(lastPoint, lastTangent))
+
+    return foldingPoints
 
 
 def buildFoldingPointsOnWire(wire: Part.Wire, maxPointsCount: int) -> [FoldingPoint]:
@@ -90,6 +94,10 @@ def buildFoldingPointsOnWire(wire: Part.Wire, maxPointsCount: int) -> [FoldingPo
     foldingPoints = dict()
     totalLengthOfNonLinearEdges = getTotalLengthOfNonLinearEdges(edges)
 
+    # only compute cosmetic folding points when there are curved edges (i.e.
+    # not only straight edges)
+    computeCosmeticFoldingPoints = 0.0 != totalLengthOfNonLinearEdges
+
     chunksOffset = 0
     if len(edges) == 1:
         chunksOffset = 1
@@ -97,7 +105,7 @@ def buildFoldingPointsOnWire(wire: Part.Wire, maxPointsCount: int) -> [FoldingPo
     for edge in edges:
         if isinstance(edge.Curve, Part.Line):
             # pick the start and end points of a straight line
-            for foldingPoint in getFoldingPointsOnStraightEdge(edge):
+            for foldingPoint in getFoldingPointsOnStraightEdge(edge, computeCosmeticFoldingPoints):
                 foldingPoints[serializeVector(foldingPoint.getPoint())] = foldingPoint
 
             continue
